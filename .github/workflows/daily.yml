@@ -1,29 +1,37 @@
-name: Daily Task Scrape
+name: Daily Revenue Bot
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 每天 UTC 0:00 = 北京时间 8:00
-  workflow_dispatch:       # 也可手动触发
+    - cron: '0 8 * * *'  # 每天 08:00 UTC = 16:00 北京时间
+  workflow_dispatch:  # 手动触发
 
 jobs:
-  scrape:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
-        run: pip install crawl4ai
-      - name: Scrape tasks
+        run: pip install requests crawl4ai
+
+      - name: Run task scraper
         run: python task_scraper_v2.py
-      - name: Generate content
+
+      - name: Run content generator
         run: python content_marketing.py
+
+      - name: Run feedback learner
+        run: python feedback_learner.py
+
       - name: Commit results
         run: |
-          git config user.name "Task Bot"
-          git config user.email "bot@zero-costearn.local"
-          git add data/ content/
-          git diff --staged --quiet || git commit -m "chore: daily update $(date +%Y-%m-%d)"
+          git config user.name "PrivacyAI Bot"
+          git config user.email "bot@mi-agent.github.io"
+          git add data/ content/ feedback/
+          git commit -m "feat: daily update $(date '+%Y-%m-%d')" || echo "No changes"
           git push
