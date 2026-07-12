@@ -47,6 +47,30 @@ PLATFORMS = {
         "categories": ["programming", "ai-ml", "devops"],
         "lang": "en",
     },
+    "zbj": {
+        "name": "猪八戒",
+        "base": "https://task.zbj.com",
+        "categories": [
+            "rjgw",  # 软件开发
+            "wxkf",  # 网站建设
+            "appkf", # APP开发
+            "sjkfw", # 数据服务
+        ],
+        "lang": "zh",
+        "salary_hint": "500-5000/单",
+    },
+    "ipweike": {
+        "name": "一品威客",
+        "base": "https://www.epwk.com",
+        "categories": [
+            "software",      # 软件开发
+            "website",       # 网站建设
+            "mobile-app",    # APP开发
+            "design",        # 设计服务
+        ],
+        "lang": "zh",
+        "salary_hint": "1000-10000/单",
+    },
 }
 
 # ============ 通用工具 ============
@@ -54,6 +78,114 @@ def clean(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
     return text[:200]
+
+def standardize_salary(salary: str, lang: str = "zh") -> dict:
+    """
+    标准化薪资数据，返回统一格式的字典
+    返回格式: {"raw": str, "min": float, "max": float, "unit": str, "currency": str, "display": str}
+    """
+    result = {"raw": salary, "min": 0, "max": 0, "unit": "", "currency": "CNY", "display": salary}
+    
+    if not salary:
+        return result
+    
+    # 中文薪资处理
+    if lang == "zh":
+        # 处理 "15-35k" 或 "15K-35K" 格式
+        m = re.search(r'(\d+(?:\.\d+)?)\s*[kK万]?\s*[-~至到]\s*(\d+(?:\.\d+)?)\s*[kK万]?', salary)
+        if m:
+            min_val, max_val = float(m.group(1)), float(m.group(2))
+            unit_match = re.search(r'([kK万])', salary)
+            unit = unit_match.group(1) if unit_match else "k"
+            
+            if unit == "万":
+                result["min"] = min_val * 10  # 转换为k
+                result["max"] = max_val * 10
+                result["currency"] = "CNY"
+                result["display"] = f"{min_val}-{max_val}万/年"
+            else:
+                result["min"] = min_val
+                result["max"] = max_val
+                result["currency"] = "CNY"
+                result["display"] = f"{min_val}-{max_val}k/月"
+            return result
+        
+        # 单值处理 "20k" 或 "2万"
+        m = re.search(r'(\d+(?:\.\d+)?)\s*([kK万])', salary)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2)
+            if unit == "万":
+                result["min"] = result["max"] = val * 10
+                result["display"] = f"约{val}万/年"
+            else:
+                result["min"] = result["max"] = val
+                result["display"] = f"约{val}k/月"
+            return result
+            
+        # 处理元格式 "5000-10000元/月"
+        m = re.search(r'(\d+(?:,\d{3})*(?:\.\d+)?)\s*[-~至到]\s*(\d+(?:,\d{3})*(?:\.\d+)?)', salary.replace(',', ''))
+        if m:
+            min_val, max_val = float(m.group(1)), float(m.group(2))
+            if min_val > 1000:  # 超过1000的按月薪算
+                result["min"] = min_val / 1000
+                result["max"] = max_val / 1000
+                result["display"] = f"{min_val/1000:.0f}-{max_val/1000:.0f}k/月"
+            else:
+                result["min"] = result["max"] = min_val
+                result["display"] = f"{min_val}k/月"
+            return result
+    
+    # 英文薪资处理 (USD)
+    if lang == "en":
+        # 时薪格式 $50-100/hr
+        m = re.search(r'\$(\d+(?:,\d{3})*(?:\.\d+)?)\s*[-~至到]\s*\$?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:/hr|per hour|hourly)', salary, re.I)
+        if m:
+            result["min"] = float(m.group(1).replace(',', ''))
+            result["max"] = float(m.group(2).replace(',', ''))
+            result["unit"] = "hr"
+            result["currency"] = "USD"
+            # 转换为年薪估算 (40h/week * 52周)
+            result["display"] = f"${result['min']}-${result['max']}/hr (≈${result['min']*2080/1000:.0f}k-${result['max']*2080/1000:.0f}k/年)"
+            return result
+        
+        # 年薪格式 $80k-150k 或 $80,000-$150,000
+        m = re.search(r'\$(\d+(?:,\d{3})*(?:\.\d+)?)\s*[-~至到]\s*\$?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:k|K|/yr|per year|yearly)?', salary, re.I)
+        if m:
+            val1 = float(m.group(1).replace(',', ''))
+            val2 = float(m.group(2).replace(',', ''))
+            # 如果数值大于1000且有k或/yr，认为是年薪
+            if 'k' in salary.lower() or '/yr' in salary.lower() or (val1 > 1000 and val2 > 1000):
+                result["min"] = val1 / 1000 if val1 > 100 else val1
+                result["max"] = val2 / 1000 if val2 > 100 else val2
+            else:
+                result["min"] = val1
+                result["max"] = val2
+            result["unit"] = "yr"
+            result["currency"] = "USD"
+            result["display"] = f"${result['min']}k-${result['max']}k/年"
+            return result
+        
+        # 月薪格式
+        m = re.search(r'\$(\d+(?:,\d{3})*(?:\.\d+)?)\s*[-~至到]\s*\$?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:/mo|per month|monthly)', salary, re.I)
+        if m:
+            result["min"] = float(m.group(1).replace(',', ''))
+            result["max"] = float(m.group(2).replace(',', ''))
+            result["unit"] = "mo"
+            result["currency"] = "USD"
+            result["display"] = f"${result['min']}-{result['max']}/月"
+            return result
+    
+    # 猪八戒/一品威客 单次项目报价格式
+    m = re.search(r'(\d+(?:,\d{3})*(?:\.\d+)?)\s*[-~至到]\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:元|块)', salary)
+    if m:
+        result["min"] = float(m.group(1).replace(',', ''))
+        result["max"] = float(m.group(2).replace(',', ''))
+        result["currency"] = "CNY"
+        result["display"] = f"¥{result['min']:,.0f}-{result['max']:,.0f}/单"
+        return result
+    
+    return result
 
 def extract_salary(text: str, platform: str) -> Optional[str]:
     """Extract salary from text based on platform"""
@@ -69,6 +201,8 @@ def extract_salary(text: str, platform: str) -> Optional[str]:
             r'((?:\d+\.)?\d+[\-~](?:\d+\.)?\d+)\s*(?:万|k|K)',
             r'[¥￥]\s*(\d+[\-~]\d+)',
             r'(\d+k[\-~]\d+k)',
+            r'(\d+(?:,\d{3})*\s*[-~至到]\s*\d+(?:,\d{3})*)\s*(?:元|块)',  # 中文金额
+            r'((?:\d+\.)?\d+万)',  # 万结尾
         ]
     
     for p in patterns:
@@ -153,7 +287,7 @@ async def crawl_yuancheng_jobs() -> List[Dict]:
     return jobs
 
 async def crawl_wwr_jobs() -> List[Dict]:
-    """爬取 We Work Remotely"""
+    """爬取 We Work Remotely - 改进版"""
     jobs = []
     seen = set()
     browser_cfg = BrowserConfig(headless=True, verbose=False)
@@ -171,50 +305,221 @@ async def crawl_wwr_jobs() -> List[Dict]:
                 
                 md = r.markdown
                 
-                # Extract job entries: company name + title + apply link
-                entries = re.findall(
-                    r'(?:class="[^"]*company[^"]*"[^>]*>([^<]+)|'
-                    r'class="[^"]*title[^"]*"[^>]*>\s*<a[^>]*>([^<]+)|'
-                    r'(?:apply|company)-url[^>]*"(https://[^\"]+)',
-                    md
+                # 改进: 使用更精确的解析模式
+                # 匹配格式: 公司名 + 职位 + 地点/公司类型 + 链接
+                job_pattern = re.compile(
+                    r'(?:^|\n)\s*([A-Z][A-Za-z\s&,\.]+(?:Inc|Corp|Ltd|LLC|Technologies|IO|AI|Co)?)\s*[-–—]\s*\n?\s*([^\n]+?(?:Remote|Full[- ]?Time|Part[- ]?Time|Contract)[^\n]*)\n?\s*(?:[^<\n]*公司)?\s*'
+                    r'(https://weworkremotely\.com/jobs/\d+)',
+                    re.MULTILINE | re.IGNORECASE
                 )
                 
-                # Simpler approach: find job sections
-                sections = re.split(r'-{5,}', md)
-                
-                for section in sections[1:20]:  # First 20 sections
-                    lines = [l.strip() for l in section.split('\n') if l.strip()]
-                    if len(lines) < 2:
+                for match in job_pattern.finditer(md):
+                    company = clean(match.group(1))
+                    title = clean(match.group(2))
+                    job_url = match.group(3)
+                    
+                    if job_url in seen or len(title) < 10:
                         continue
+                    seen.add(job_url)
                     
-                    title = clean(lines[0]) if lines else ""
-                    company = ""
-                    salary = extract_salary(section, "en") or ""
-                    url = ""
+                    # 获取该职位的详情片段
+                    section_start = match.start()
+                    section_end = min(section_start + 500, len(md))
+                    section = md[section_start:section_end]
                     
-                    for line in lines[1:5]:
-                        if not company and re.search(r'[A-Z][a-z]+ [A-Z]', line):
-                            company = clean(line)
-                        if not url and 'weworkremotely.com' in line:
-                            m = re.search(r'https://[^\s<>"\']+', line)
-                            if m:
-                                url = m.group(0)
+                    salary = extract_salary(section, "en") or "Competitive"
                     
-                    if len(title) > 10 and title not in [j.get('title','') for j in jobs]:
-                        jobs.append({
-                            "platform": "We Work Remotely",
-                            "title": title[:80],
-                            "salary": salary or "Competitive",
-                            "company": company or "Remote Company",
-                            "description": clean(' '.join(lines[1:4]))[:150],
-                            "url": url or url,
-                            "category": cat.replace("remote-","").replace("-jobs",""),
-                            "lang": "en",
-                            "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                            "currency": "USD",
-                            "type": "Remote Full-time/Contract",
-                        })
+                    jobs.append({
+                        "platform": "We Work Remotely",
+                        "title": title[:80],
+                        "salary": salary,
+                        "company": company[:40],
+                        "description": clean(' '.join(section.split('\n')[2:5]))[:150],
+                        "url": job_url,
+                        "category": cat.replace("remote-","").replace("-jobs",""),
+                        "lang": "en",
+                        "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "currency": "USD",
+                        "type": "Remote Full-time/Contract",
+                    })
+                    
+                    await asyncio.sleep(0.3)  # 礼貌延迟
+                    
             except Exception as e:
+                pass
+    
+    return jobs
+
+async def crawl_zbj_tasks() -> List[Dict]:
+    """爬取猪八戒任务"""
+    jobs = []
+    seen = set()
+    browser_cfg = BrowserConfig(headless=True, verbose=False)
+    run_cfg = CrawlerRunConfig(verbose=False, page_timeout=20000)
+    
+    async with AsyncWebCrawler(config=browser_cfg) as crawler:
+        cats = PLATFORMS["zbj"]["categories"]
+        
+        for cat in cats:
+            url = f"https://task.zbj.com/{cat}/"
+            try:
+                r = await crawler.arun(url, config=run_cfg)
+                if not r.success:
+                    continue
+                
+                md = r.markdown[:5000]
+                
+                # 猪八戒任务链接模式
+                task_urls = list(set(re.findall(r'https://task\.zbj\.com/\w+/t\d+\.html', md)))
+                
+                for task_url in task_urls[:5]:
+                    if task_url in seen:
+                        continue
+                    seen.add(task_url)
+                    
+                    try:
+                        r2 = await crawler.arun(task_url, config=run_cfg)
+                        if not r2.success:
+                            continue
+                        
+                        md2 = r2.markdown[:3000]
+                        
+                        # 提取标题
+                        title_m = re.search(
+                            r'<h1[^>]*>([^<]{5,80})|'
+                            r'class="[^"]*title[^"]*"[^>]*>([^<]{5,80})|'
+                            r'招标项目[^：]*：\s*([^\n<]{5,80})',
+                            md2
+                        )
+                        title = clean(title_m.group(1) or title_m.group(2) or title_m.group(3) or "未获取") if title_m else "未获取"
+                        
+                        # 提取金额
+                        salary_m = re.search(
+                            r'(?:预算|报价|价格|金额)[^：]*：\s*([^元\n]{5,30})|'
+                            r'(\d+(?:,\d{3})*\s*[-~至到]\s*\d+(?:,\d{3})*)\s*元|'
+                            r'¥\s*(\d+(?:,\d{3})+)',
+                            md2
+                        )
+                        salary = salary_m.group(0).strip() if salary_m else "面议"
+                        
+                        # 提取雇主/公司
+                        company_m = re.search(
+                            r'(?:雇主|发包方|客户)[^：]*：\s*([^\n<]{2,30})|'
+                            r'class="[^"]*user[^"]*"[^>]*>([^<]{2,30})',
+                            md2
+                        )
+                        company = clean(company_m.group(1) or company_m.group(2) or "匿名雇主")[:30]
+                        
+                        # 提取描述
+                        desc_lines = [l.strip() for l in md2.split('\n') if 10 < len(l.strip()) < 150]
+                        desc = ' | '.join(desc_lines[:3])
+                        
+                        jobs.append({
+                            "platform": "猪八戒",
+                            "title": title,
+                            "salary": salary,
+                            "company": company,
+                            "description": desc[:150],
+                            "url": task_url,
+                            "category": cat,
+                            "lang": "zh",
+                            "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "currency": "CNY",
+                            "type": "招标/接单",
+                        })
+                        
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+                        
+            except Exception:
+                pass
+    
+    return jobs
+
+async def crawl_ipweike_tasks() -> List[Dict]:
+    """爬取一品威客任务"""
+    jobs = []
+    seen = set()
+    browser_cfg = BrowserConfig(headless=True, verbose=False)
+    run_cfg = CrawlerRunConfig(verbose=False, page_timeout=20000)
+    
+    async with AsyncWebCrawler(config=browser_cfg) as crawler:
+        cats = PLATFORMS["ipweike"]["categories"]
+        
+        for cat in cats:
+            url = f"https://www.epwk.com/{cat}/"
+            try:
+                r = await crawler.arun(url, config=run_cfg)
+                if not r.success:
+                    continue
+                
+                md = r.markdown[:5000]
+                
+                # 一品威客任务链接模式
+                task_urls = list(set(re.findall(r'https://www\.epwk\.com/\w+/\d+\.html', md)))
+                
+                for task_url in task_urls[:5]:
+                    if task_url in seen:
+                        continue
+                    seen.add(task_url)
+                    
+                    try:
+                        r2 = await crawler.arun(task_url, config=run_cfg)
+                        if not r2.success:
+                            continue
+                        
+                        md2 = r2.markdown[:3000]
+                        
+                        # 提取标题
+                        title_m = re.search(
+                            r'<h1[^>]*>([^<]{5,80})|'
+                            r'class="[^"]*title[^"]*"[^>]*>([^<]{5,80})|'
+                            r'任务名称[^：]*：\s*([^\n<]{5,80})',
+                            md2
+                        )
+                        title = clean(title_m.group(1) or title_m.group(2) or title_m.group(3) or "未获取") if title_m else "未获取"
+                        
+                        # 提取金额
+                        salary_m = re.search(
+                            r'(?:预算|报价|赏金|金额)[^：]*：\s*([^元\n]{5,30})|'
+                            r'(\d+(?:,\d{3})*\s*[-~至到]\s*\d+(?:,\d{3})*)\s*元|'
+                            r'¥\s*(\d+(?:,\d{3})+)',
+                            md2
+                        )
+                        salary = salary_m.group(0).strip() if salary_m else "面议"
+                        
+                        # 提取雇主
+                        company_m = re.search(
+                            r'(?:雇主|发布者|客户)[^：]*：\s*([^\n<]{2,30})|'
+                            r'class="[^"]*nickname[^"]*"[^>]*>([^<]{2,30})',
+                            md2
+                        )
+                        company = clean(company_m.group(1) or company_m.group(2) or "匿名雇主")[:30]
+                        
+                        # 提取描述
+                        desc_lines = [l.strip() for l in md2.split('\n') if 10 < len(l.strip()) < 150]
+                        desc = ' | '.join(desc_lines[:3])
+                        
+                        jobs.append({
+                            "platform": "一品威客",
+                            "title": title,
+                            "salary": salary,
+                            "company": company,
+                            "description": desc[:150],
+                            "url": task_url,
+                            "category": cat,
+                            "lang": "zh",
+                            "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "currency": "CNY",
+                            "type": "招标/接单",
+                        })
+                        
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+                        
+            except Exception:
                 pass
     
     return jobs
